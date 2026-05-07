@@ -531,6 +531,11 @@ export class CollectionSyncService {
     const processedCollectionKeys = new Set<string>();
     let processedCount = 0;
 
+    const { RandomListManager } = await import(
+      '@server/lib/collections/utils/RandomListManager'
+    );
+    RandomListManager.startSession();
+
     // Process each collection config directly
     for (const config of collectionConfigs) {
       if (this.cancelled) break;
@@ -755,6 +760,8 @@ export class CollectionSyncService {
         IndividualCollectionScheduler.releaseApiAccess(config.type);
       }
     }
+
+    RandomListManager.endSession();
 
     // Clear the sync cache after completion to free memory
     syncCacheService.clear();

@@ -34,6 +34,17 @@ export class RandomListManager {
   > = new Map();
   private static readonly DISCOVERY_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+  // Session-scoped tracking of URLs already selected by other collections in this sync run
+  private static sessionUsedUrls = new Map<string, Set<string>>();
+
+  public static startSession(): void {
+    this.sessionUsedUrls.clear();
+  }
+
+  public static endSession(): void {
+    this.sessionUsedUrls.clear();
+  }
+
   // TMDB filtered collections cache
   private static tmdbFilteredCache: {
     collections: { id: number; name: string }[];
@@ -481,6 +492,16 @@ https://letterboxd.com/cinema/list/criterion-collection/
         }
       );
 
+      // Skip URLs already used by another collection in this sync session
+      const sessionUsed = this.sessionUsedUrls.get(sourceType);
+      if (sessionUsed?.has(selectedUrl)) {
+        logger.debug(
+          `Skipping ${selectedUrl} — already used by another collection this session`,
+          { label: 'RandomListManager', sourceType }
+        );
+        continue;
+      }
+
       // Validate this URL has enough items of target type
       try {
         const isValid = await this.validateUrlForMediaType(
@@ -502,6 +523,11 @@ https://letterboxd.com/cinema/list/criterion-collection/
               attempt: attempt + 1,
             }
           );
+
+          if (!this.sessionUsedUrls.has(sourceType)) {
+            this.sessionUsedUrls.set(sourceType, new Set());
+          }
+          this.sessionUsedUrls.get(sourceType)!.add(selectedUrl);
 
           return selectedUrl;
         }
