@@ -534,6 +534,12 @@ export class CollectionSyncService {
     const { RandomListManager } = await import(
       '@server/lib/collections/utils/RandomListManager'
     );
+
+    // Delete existing Plex collections for all random configs so each sync
+    // always creates a fresh collection with the newly-chosen title, eliminating
+    // any risk of stale names or duplicate collection conflicts.
+    await this.preDeleteRandomCollections(plexClient, collectionConfigs);
+
     RandomListManager.startSession();
 
     // Process each collection config directly
@@ -865,6 +871,65 @@ export class CollectionSyncService {
         }`
       );
     }
+  }
+
+  /**
+   * Delete existing Plex collections for all random-subtype configs before sync.
+   * This guarantees each random collection is always created fresh with the
+   * newly-chosen title, preventing stale names and duplicate collection conflicts.
+   */
+  private async preDeleteRandomCollections(
+    plexClient: PlexAPI,
+    collectionConfigs: CollectionConfig[]
+  ): Promise<void> {
+    const randomConfigs = collectionConfigs.filter(
+      (config) => config.subtype === 'random' && config.collectionRatingKey
+    );
+
+    if (randomConfigs.length === 0) {
+      return;
+    }
+
+    logger.info(
+      `Pre-deleting ${randomConfigs.length} random collection(s) before sync`,
+      {
+        label: 'Collection Sync Service',
+        count: randomConfigs.length,
+        names: randomConfigs.map((c) => c.name),
+      }
+    );
+
+    const settings = getSettings();
+    const allConfigs = settings.plex.collectionConfigs || [];
+
+    for (const config of randomConfigs) {
+      try {
+        await plexClient.deleteCollection(config.collectionRatingKey!);
+        logger.debug(`Deleted random collection "${config.name}" before sync`, {
+          label: 'Collection Sync Service',
+          configId: config.id,
+          ratingKey: config.collectionRatingKey,
+        });
+      } catch (error) {
+        logger.warn(
+          `Failed to delete random collection "${config.name}" before sync — will re-use or recreate`,
+          {
+            label: 'Collection Sync Service',
+            configId: config.id,
+            ratingKey: config.collectionRatingKey,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+      }
+
+      // Always clear the stored rating key so the sync creates a fresh collection
+      const idx = allConfigs.findIndex((c) => c.id === config.id);
+      if (idx !== -1) {
+        allConfigs[idx] = { ...allConfigs[idx], collectionRatingKey: undefined };
+      }
+    }
+
+    settings.save();
   }
 
   /**
